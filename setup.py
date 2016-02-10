@@ -67,6 +67,7 @@ setup_requires = [
 
 install_requires = [
     #  'invenio-assets>=1.0.0a4',
+    'elasticsearch-dsl>=0.0.11',
     'Flask-BabelEx>=0.9.2',
     'invenio-db>=1.0.0a9',
     'invenio-indexer>=1.0.0a1',

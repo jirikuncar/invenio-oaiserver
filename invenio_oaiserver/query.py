@@ -20,6 +20,7 @@
 """Query parser."""
 
 import pypeg2
+from elasticsearch_dsl import Search
 from flask import current_app
 from invenio_query_parser.walkers.match_unit import MatchUnit
 from invenio_records.models import RecordMetadata
@@ -50,11 +51,11 @@ def get_records(**kwargs):
     """Get records."""
     page = kwargs.get('resumptionToken', {}).get('page', 1)
     size = current_app.config['OAISERVER_PAGE_SIZE']
-    query = Query()[(page-1)*size:page*size]
+    query = Search().using(current_search_client)
+    # index=current_app.config['OAISERVER_RECORD_INDEX'],
 
-    body = {}
     if 'set' in kwargs:
-        body['must'] = [{'match': {'_oai.sets': kwargs['set']}}]
+        query = query.query('match', **{'_oai.sets': kwargs['set']})
 
     time_range = {}
     if 'from_' in kwargs:
@@ -62,15 +63,13 @@ def get_records(**kwargs):
     if 'until' in kwargs:
         time_range['lte'] = kwargs['until']
     if time_range:
-        body['filter'] = [{'range': {'_oai.updated': time_range}}]
+        query = query.filter('range', **{'_oai.updated': time_range})
 
-    if body:
-        query.body = {'query': {'bool': body}}
+    query = query[(page-1)*size:page*size]
 
-    response = current_search_client.search(
-        index=current_app.config['OAISERVER_RECORD_INDEX'],
-        body=query.body,
-    )
+    current_app.logger.info(query.to_dict())
+
+    response = query.execute()
 
     class Pagination(object):
         """Dummy pagination class."""
@@ -78,18 +77,17 @@ def get_records(**kwargs):
         @property
         def has_next(self):
             """Return True if there are more results."""
-            return page*size <= response['hits']['total']
+            return page*size <= response.hits.total
 
         @property
         def items(self):
             """Return iterator."""
-            for result in response['hits']['hits']:
+            for result in response:
                 yield {
-                    'id': result['_id'],
-                    'json': result['_source'],
-                    # FIXME use ES
+                    'id': result.meta.id,
+                    'json': result._d_,
                     'updated': RecordMetadata.query.filter_by(
-                        id=result['_id']).one().updated,
+                        id=result.meta.id).one().updated,
                 }
 
     return Pagination()
